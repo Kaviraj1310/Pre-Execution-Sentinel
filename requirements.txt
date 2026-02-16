@@ -1,0 +1,12 @@
+tensorflow
+keras
+numpy
+scikit-learn
+pandas
+Pillow
+joblib
+fastapi
+uvicorn
+python-multipart
+requests
+werkzeug

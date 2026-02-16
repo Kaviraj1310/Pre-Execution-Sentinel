@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pre-Execution Sentinel</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1> PRE-EXECUTION SENTINEL </h1>
+    <p>Upload a file or scan a URL. Only one input is active at a time. Temporary files are deleted automatically on the server.</p>
+
+    <div class="ingestion-method">
+      <div class="input-group">
+        <h3>1. FILE UPLOAD </h3>
+        <input type="file" id="file-input" />
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <button id="scan-file-btn">SCAN FILE</button>
+          <button id="clear-file-btn" type="button">CLEAR</button>
+          <div id="file-spinner" class="spinner" style="display:none;"></div>
+        </div>
+        <small class="hint">Selecting a file will disable the URL input.</small>
+      </div>
+
+      <div class="input-group">
+        <h3>2. URL SCAN </h3>
+        <input type="text" id="url-input" placeholder="https://example.com/sample.exe" />
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <button id="scan-url-btn">SCAN URL</button>
+          <button id="clear-url-btn" type="button">CLEAR</button>
+          <div id="url-spinner" class="spinner" style="display:none;"></div>
+        </div>
+        <small class="hint">Typing a URL will disable the file input.</small>
+      </div>
+    </div>
+
+    <div id="result-display"></div>
+  </div>
+
+<script>
+/* API endpoints (server) */
+const API_FILE = "/api/scan/file2"; // returns 'deleted' flag
+const API_URL  = "/api/scan/url";
+
+/* helpers */
+const el = id => document.getElementById(id);
+const showSpinner = (id, on) => el(id).style.display = on ? "block" : "none";
+
+function render(data){
+  const filename = data.filename || "unknown";
+  const prediction = data.prediction || "UNKNOWN";
+  const isMalicious = !!data.is_malicious;
+  const confidence = (typeof data.confidence === "number") ? data.confidence.toFixed(2) + "%" : (data.confidence_display ? data.confidence_display + "%" : "N/A");
+  const severity = data.severity || (data.severity_score ? data.severity_score + "/5" : "N/A");
+  const severity_label = data.severity_label || "N/A";
+  const validity = (typeof data.validity === "boolean") ? (data.validity ? "Valid" : "Invalid") : "Unknown";
+  const deleted = (typeof data.deleted === "boolean") ? (data.deleted ? "Yes" : "No") : "Unknown";
+  const malware_type = data.malware_type || "None";
+  const malware_action = data.malware_action || data.scanned_result || "No details";
+  const detection = data.detection_method || "N/A";
+  const scan_time = data.scan_time !== undefined ? data.scan_time + "s" : "N/A";
+
+  const resultClass = isMalicious ? "result-MALICIOUS" : "result-BENIGN";
+  const blink = isMalicious ? '<div class="blinking-warning"><strong>🚨 MALICIOUS</strong></div>' : '';
+
+  const html = `
+    <div class="scan-result ${resultClass}">
+      ${blink}
+      <div class="detail-row"><span class="label">SOURCE:</span><span class="value">${filename}</span></div>
+      <div class="detail-row"><span class="label">PREDICTION:</span><span class="value">${prediction}</span></div>
+      <div class="detail-row"><span class="label">CONFIDENCE:</span><span class="value">${confidence}</span></div>
+      <div class="detail-row"><span class="label">SEVERITY:</span><span class="value">${severity} (${severity_label})</span></div>
+      <div class="detail-row"><span class="label">VALIDITY:</span><span class="value">${validity}</span></div>
+      <div class="detail-row"><span class="label">DELETED (TEMP):</span><span class="value">${deleted}</span></div>
+      <div class="detail-row"><span class="label">SCAN TIME:</span><span class="value">${scan_time}</span></div>
+      <hr style="border-color:#30363d"/>
+      <div class="detail-row"><span class="label">THREAT TYPE:</span><span class="value">${malware_type}</span></div>
+      <div class="detail-row"><span class="label">EXPLANATION:</span><span class="value">${malware_action}</span></div>
+      <div class="detail-row"><span class="label">DETECTION METHOD:</span><span class="value">${detection}</span></div>
+    </div>
+  `;
+  el("result-display").innerHTML = html;
+}
+
+/* POST helper */
+async function postForm(url, form){
+  const r = await fetch(url, { method: "POST", body: form });
+  const json = await r.json().catch(()=>({ error: "invalid_json_response" }));
+  return { ok: r.ok, json };
+}
+
+/* --- MUTUAL-EXCLUSIVE INPUT LOGIC --- */
+/* When a file is selected, disable URL input & URL scan button.
+   When URL text is present, disable file input & file scan button.
+   Clear buttons reset the other input and re-enable. */
+
+function updateInputState() {
+  const fileHas = el("file-input").files.length > 0;
+  const urlVal = el("url-input").value.trim().length > 0;
+
+  if (fileHas) {
+    el("url-input").disabled = true;
+    el("scan-url-btn").disabled = true;
+  } else {
+    el("url-input").disabled = false;
+    el("scan-url-btn").disabled = false;
+  }
+
+  if (urlVal) {
+    el("file-input").disabled = true;
+    el("scan-file-btn").disabled = true;
+  } else {
+    el("file-input").disabled = false;
+    el("scan-file-btn").disabled = false;
+  }
+}
+
+/* attach events to maintain exclusivity live */
+el("file-input").addEventListener("change", () => {
+  updateInputState();
+  // If a file is selected, clear URL input (optional). We keep a clear button to avoid accidental clearing,
+  // but it's helpful to auto-clear lightly so behavior is consistent — comment out next line if you don't want auto-clear:
+  if (el("file-input").files.length > 0) el("url-input").value = "";
+  updateInputState();
+});
+
+el("url-input").addEventListener("input", () => {
+  updateInputState();
+  // If URL typed, clear file selection to ensure mutual exclusivity
+  if (el("url-input").value.trim().length > 0) {
+    // clear file input safely
+    try { el("file-input").value = ""; } catch(e){ /* ignore */ }
+  }
+  updateInputState();
+});
+
+/* Clear buttons */
+el("clear-file-btn").addEventListener("click", () => {
+  try { el("file-input").value = ""; } catch(e) {}
+  updateInputState();
+});
+el("clear-url-btn").addEventListener("click", () => {
+  el("url-input").value = "";
+  updateInputState();
+});
+
+/* --- SCAN ACTIONS --- */
+el("scan-file-btn").addEventListener("click", async () => {
+  if (el("file-input").disabled) return; // safety
+  if (!el("file-input").files.length) { alert("Please choose a file."); return; }
+
+  const form = new FormData();
+  form.append("file", el("file-input").files[0]);
+
+  showSpinner("file-spinner", true);
+  el("result-display").innerHTML = "";
+
+  try {
+    const res = await postForm(API_FILE, form);
+    showSpinner("file-spinner", false);
+    if (res.ok) {
+      render(res.json);
+    } else {
+      el("result-display").innerHTML = `<div class="scan-result result-MALICIOUS"><strong>SCAN FAILED:</strong> ${res.json.detail || JSON.stringify(res.json)}</div>`;
+      console.error("Scan error:", res.json);
+    }
+  } catch (e) {
+    showSpinner("file-spinner", false);
+    el("result-display").innerHTML = `<div class="scan-result result-MALICIOUS"><strong>NETWORK ERROR:</strong> ${e.message}</div>`;
+    console.error(e);
+  }
+});
+
+el("scan-url-btn").addEventListener("click", async () => {
+  if (el("scan-url-btn").disabled) return; // safety
+  const urlv = el("url-input").value.trim();
+  if (!urlv) { alert("Enter URL"); return; }
+
+  const form = new FormData();
+  form.append("url", urlv);
+
+  showSpinner("url-spinner", true);
+  el("result-display").innerHTML = "";
+
+  try {
+    const res = await postForm(API_URL, form);
+    showSpinner("url-spinner", false);
+    if (res.ok) {
+      render(res.json);
+    } else {
+      el("result-display").innerHTML = `<div class="scan-result result-MALICIOUS"><strong>SCAN FAILED:</strong> ${res.json.detail || JSON.stringify(res.json)}</div>`;
+      console.error("Scan URL error:", res.json);
+    }
+  } catch (e) {
+    showSpinner("url-spinner", false);
+    el("result-display").innerHTML = `<div class="scan-result result-MALICIOUS"><strong>NETWORK ERROR:</strong> ${e.message}</div>`;
+    console.error(e);
+  }
+});
+
+/* initialize state on load */
+updateInputState();
+</script>
+</body>
+</html>

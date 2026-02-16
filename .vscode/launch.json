@@ -1,0 +1,35 @@
+// .vscode/launch.json
+{
+    "version": "0.2.0",
+    "configurations": [
+        // --- STANDARD PYTHON DEBUGGER (For debugging utility scripts like run.py) ---
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        
+        // --- FASTAPI/UVICORN DEBUGGER (For debugging main.py) ---
+        {
+            "name": "Debug FastAPI (Uvicorn Server)",
+            "type": "debugpy",
+            "request": "launch",
+            // The module argument tells the debugger to run uvicorn
+            "module": "uvicorn", 
+            "args": [
+                "main:app",       // The entry point: main.py, FastAPI object named 'app'
+                "--reload",       // Enable auto-reloading during development
+                "--host",
+                "0.0.0.0",        // Listen on all network interfaces
+                "--port",
+                "8000"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        }
+        
+    ]
+}
